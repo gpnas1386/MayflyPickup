@@ -9,7 +9,7 @@ struct DiagnosticsView: View {
         Form {
             Section("存储") {
                 row("App Group", SharedStore.appGroupID)
-                row("状态文件", SharedStore.shared.groupURL?.appendingPathComponent("state.json").path ?? "未启用")
+                row("状态文件", SharedStore.shared.groupURL?.path ?? "未启用")
                 row("备用路径", SharedStore.shared.fallbackURL.path)
                 row("文件存在", FileManager.default.fileExists(atPath: SharedStore.shared.fileURL.path) ? "是" : "否")
             }

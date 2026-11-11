@@ -60,13 +60,21 @@ enum LiveIsland {
             return
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        let attrs = MayflyActivityAttributes(total: pending.count, stationHint: top.stationName)
         do {
-            let a = try Activity<MayflyActivityAttributes>.request(
-                attributes: MayflyActivityAttributes(total: pending.count, stationHint: top.stationName),
-                content: ActivityContent(state: state, staleDate: Date().addingTimeInterval(3600)),
-                pushType: nil)
-            currentID = a.id
-            lastState = state
+            if #available(iOS 16.2, *) {
+                let a = try Activity<MayflyActivityAttributes>.request(
+                    attributes: attrs,
+                    content: ActivityContent(state: state, staleDate: Date().addingTimeInterval(3600)),
+                    pushType: nil)
+                currentID = a.id
+                lastState = state
+            } else {
+                let a = try Activity<MayflyActivityAttributes>.request(
+                    attributes: attrs, contentState: state, pushType: nil)
+                currentID = a.id
+                lastState = state
+            }
         } catch {
             NSLog("[Mayfly] live activity failed: \(error)")
         }

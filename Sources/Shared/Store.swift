@@ -22,6 +22,9 @@ public final class SharedStore {
 
     private var primaryURL: URL { groupURL ?? fallbackURL }
 
+    /// 实际生效的状态文件路径（诊断页使用）
+    public var fileURL: URL { primaryURL }
+
     public func load() -> Snapshot {
         lock.lock(); defer { lock.unlock() }
         var best = Snapshot()
@@ -84,8 +87,8 @@ public final class Pref {
         set { ud.set(newValue, forKey: "darkEnd") }
     }
     public var whalePick: String {
-        get { defaults.string(forKey: "whalePick") ?? "" }
-        set { defaults.set(newValue, forKey: "whalePick") }
+        get { ud.string(forKey: "whalePick") ?? "" }
+        set { ud.set(newValue, forKey: "whalePick") }
     }
 
     public var whaleArt: String {

@@ -52,6 +52,11 @@ enum DeepScan {
         return pickups(fromJSON: obj, source: source)
     }
 
+    /// 抓包捕获体（JSON 字典/数组）深度挖掘
+    static func pickups(fromCapture obj: Any?, source: Platform) -> [PickupItem] {
+        pickups(fromJSON: obj, source: source)
+    }
+
     static func identityCode(in obj: Any?) -> String {
         var found = ""
         let re = try? NSRegularExpression(pattern: #"(\d{1,2})-(\d{1,2})-(\d{3,5})"#)

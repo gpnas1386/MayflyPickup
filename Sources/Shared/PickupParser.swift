@@ -111,8 +111,8 @@ public enum PickupParser {
 }
 
 public extension Kuaidi100 {
-    static func extractPickupCode(from text: String) -> String? {
-        PickupParser.codes(in: text).first
+    static func extractPickupCode(from text: String) -> String {
+        PickupParser.codes(in: text).first ?? ""
     }
 
     static func extractStation(from text: String) -> String {
@@ -137,14 +137,5 @@ public struct ParsedCode: Identifiable, Hashable {
     public init(code: String, station: String) {
         self.code = code
         self.station = station
-    }
-}
-
-public extension Kuaidi100 {
-    static func extractPickupCode(from text: String) -> String {
-        PickupParser.extractPickupCode(from: text) ?? ""
-    }
-    static func extractStation(from text: String) -> String {
-        PickupParser.extractStation(from: text)
     }
 }

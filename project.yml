@@ -2,7 +2,7 @@ name: MayflyPickup
 options:
   bundleIdPrefix: com.agent
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "16.1"
   createIntermediateGroups: true
 settings:
   base:
@@ -14,7 +14,7 @@ targets:
   MayflyPickup:
     type: application
     platform: iOS
-    deploymentTarget: "17.0"
+    deploymentTarget: "16.1"
     sources:
       - path: Sources/App
       - path: Sources/Shared
@@ -31,7 +31,7 @@ targets:
   MayflyWidgetExtension:
     type: app-extension
     platform: iOS
-    deploymentTarget: "17.0"
+    deploymentTarget: "16.1"
     sources:
       - path: Sources/Widget
       - path: Sources/Shared
