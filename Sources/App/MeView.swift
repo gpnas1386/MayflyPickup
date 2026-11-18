@@ -16,7 +16,7 @@ struct MeView: View {
                         AccountRow(platform: p, theme: theme,
                                    info: model.snap.accountsSafe[p.rawValue],
                                    login: { login = p },
-                                   scrape: { Task { await model.scrape(p, force: true) } },
+                                   scrape: { Task { await model.scrape(platform: p, force: true) } },
                                    logout: { model.logout(p) })
                     }
                 } header: {
@@ -71,7 +71,7 @@ struct MeView: View {
                     Toggle("包裹到达通知", isOn: Binding(
                         get: { Pref.shared.notifyArrival },
                         set: { Pref.shared.notifyArrival = $0 }))
-                    Button("发一条测试通知") { Notify.test() }
+                    Button("发一条测试通知") { Notifier.test() }
                 }
 
                 Section {

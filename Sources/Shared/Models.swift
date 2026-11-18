@@ -1,7 +1,9 @@
 import Foundation
 
-public enum Platform: String, Codable, CaseIterable {
+public enum Platform: String, Codable, CaseIterable, Identifiable {
     case taobao, pdd, jd, mi, manual
+
+    public var id: String { rawValue }
 
     public var title: String {
         switch self {

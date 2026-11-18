@@ -50,13 +50,13 @@ enum LiveIsland {
 
         if let id = currentID, let act = Activity<MayflyActivityAttributes>.activities.first(where: { $0.id == id }) {
             lastState = state
-            Task { await act.update(state) }
+            Task { await act.update(using: state) }
             return
         }
         if let act = Activity<MayflyActivityAttributes>.activities.first {
             currentID = act.id
             lastState = state
-            Task { await act.update(state) }
+            Task { await act.update(using: state) }
             return
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }

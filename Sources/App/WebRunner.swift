@@ -164,7 +164,7 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         if let payload = await waitPayload(kind: "identity", timeout: 10),
            let data = payload.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            res.identity = DeepScan.identityCode(obj)
+            res.identity = DeepScan.identityCode(in: obj)
         }
 
         if !waybills.isEmpty || !phone.isEmpty {
