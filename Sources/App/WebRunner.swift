@@ -14,7 +14,8 @@ enum LoginCheck {
         let names = Set(cookies.map { $0.name })
         switch p {
         case .taobao: return names.contains("unb") || names.contains("cookie2") || names.contains("_m_h5_tk") || names.contains("_nk_")
-        case .pdd: return names.contains("pdd_user_id") || names.contains("PDDAccessToken") || names.contains("api_uid")
+        // 注意：api_uid 是访客追踪 Cookie，未登录也存在，不能作为登录依据
+        case .pdd: return names.contains("pdd_user_id") || names.contains("PDDAccessToken")
         case .jd: return names.contains("pt_key") || names.contains("pt_pin")
         case .mi: return names.contains("cUserId") || names.contains("passToken") || names.contains("userId")
         case .manual: return false
@@ -35,22 +36,26 @@ enum LoginCheck {
 
 /// 隐藏 WKWebView 执行器：复用 App 默认 Cookie 仓，登录态与登录页共享
 @MainActor
-final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
-    private let web: WKWebView
+final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
+    private var web: WKWebView!
     private var loadWaiter: CheckedContinuation<Void, Never>?
     private var payloads: [(kind: String, json: String)] = []
+    private static let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1"
 
     override init() {
+        super.init()
+        // 关键：WKWebView 初始化时会拷贝 configuration，
+        // 之后对 cfg 的修改（注入脚本/注册消息桥）不会生效，必须先配置再创建 WebView
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
         cfg.defaultWebpagePreferences.allowsContentJavaScript = true
-        web = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: cfg)
-        super.init()
         cfg.userContentController.add(self, name: "mayfly")
         cfg.userContentController.addUserScript(
             WKUserScript(source: ScrapeScripts.bootstrap, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        web = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: cfg)
         web.navigationDelegate = self
-        web.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1"
+        web.uiDelegate = self
+        web.customUserAgent = Self.ua
     }
 
     func dispose() {
@@ -199,6 +204,11 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         await load(URL(string: "https://m.pinduoduo.net/mdkd/package")!)
         try? await Task.sleep(nanoseconds: 7_000_000_000)
         res.account = await account(.pdd)
+        // 滚动到底再回顶，触发快递列表的懒加载与接口请求（抓包钩子会记录响应）
+        await eval("(function(){try{window.scrollTo(0,document.body?document.body.scrollHeight:0)}catch(e){}})()")
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        await eval("(function(){try{window.scrollTo(0,0)}catch(e){}})()")
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
 
         await eval(ScrapeScripts.dumpPage)
         if let payload = await waitPayload(kind: "page", timeout: 12),
@@ -251,5 +261,15 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         }
         res.pickups = DeepScan.dedupe(res.pickups)
         return res
+    }
+
+    /// 新窗口跳转（target=_blank，常见于淘宝/拼多多登录按钮）在同一 WebView 内打开，
+    /// 否则点击无任何反应 / 登录浮层叠在原页面上
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = navigationAction.request.url, !url.absoluteString.isEmpty {
+            webView.load(URLRequest(url: url))
+        }
+        return nil
     }
 }

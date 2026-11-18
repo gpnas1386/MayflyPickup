@@ -35,8 +35,9 @@ struct AccountRow: View {
     }
 }
 
-final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate {
+final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
     let web: WKWebView
+    private(set) var loadedStart: URL?
 
     override init() {
         let cfg = WKWebViewConfiguration()
@@ -44,10 +45,28 @@ final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate {
         web = WKWebView(frame: .zero, configuration: cfg)
         super.init()
         web.navigationDelegate = self
+        web.uiDelegate = self
+    }
+
+    /// 同一登录页只加载一次，避免 SwiftUI 重建视图时叠加导航
+    func start(_ url: URL) {
+        guard loadedStart != url else { return }
+        loadedStart = url
+        web.load(URLRequest(url: url))
     }
 
     func cookies(_ done: @escaping ([HTTPCookie]) -> Void) {
         web.configuration.websiteDataStore.httpCookieStore.getAllCookies { done($0) }
+    }
+
+    /// 新窗口跳转（target=_blank，如淘宝登录面板）在同一 WebView 内打开，
+    /// 否则点击登录按钮无反应，登录浮层叠在原页面上
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = navigationAction.request.url, !url.absoluteString.isEmpty {
+            webView.load(URLRequest(url: url))
+        }
+        return nil
     }
 }
 
@@ -75,7 +94,7 @@ struct WebLoginView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Image(systemName: "hand.tap").foregroundColor(theme.sub)
-                    Text("在下方页面登录 \(platform.short)，登录后点「完成」")
+                    Text("在下方页面登录 \(platform.short)（登录面板可能整页跳转），登录后点「完成」；页面显示异常可点右上角 ↻ 刷新")
                         .font(.system(size: 12)).foregroundColor(theme.sub)
                     Spacer()
                 }
@@ -87,6 +106,13 @@ struct WebLoginView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        bridge.web.reload()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(done ? "处理中…" : "完成") {
                         guard !done else { return }
@@ -125,7 +151,7 @@ struct LoginWeb: UIViewRepresentable {
     let url: URL
 
     func makeUIView(context: Context) -> WKWebView {
-        bridge.web.load(URLRequest(url: url))
+        bridge.start(url)
         return bridge.web
     }
 
