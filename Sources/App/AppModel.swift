@@ -205,7 +205,7 @@ final class AppModel: ObservableObject {
 
     func applyScrape(_ res: ScrapeResult, source: Platform) {
         log("\(source.short) 抓取：取件码 \(res.pickups.count) · 身份码 \(res.identity.isEmpty ? "无" : "有") · 账号 \(res.nick.isEmpty ? "未识别" : res.nick)")
-        for d in res.debug { log("  [\($0)]") }
+        for d in res.debug { log("  [\(d)]") }
         if let acc = res.account {
             Pref.shared.setAccount(source, acc)
             snap.accounts?[source.rawValue] = acc
