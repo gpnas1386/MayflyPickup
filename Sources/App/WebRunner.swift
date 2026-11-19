@@ -15,7 +15,8 @@ enum LoginCheck {
     static func loggedIn(_ cookies: [HTTPCookie], _ p: Platform) -> Bool {
         let names = Set(cookies.map { $0.name })
         switch p {
-        case .taobao: return names.contains("unb") || names.contains("cookie2") || names.contains("_m_h5_tk") || names.contains("_nk_")
+        // 只认真实登录 Cookie；cookie2/_m_h5_tk/_tb_token_ 等访客 Cookie 未登录也存在，会造成假"已登录"
+        case .taobao: return names.contains("unb") || names.contains("_nk_") || names.contains("lgc") || names.contains("tracknick") || names.contains("dnk") || names.contains("skt") || names.contains("csg")
         // 注意：api_uid 是访客追踪 Cookie，未登录也存在，不能作为登录依据
         case .pdd: return names.contains("pdd_user_id") || names.contains("PDDAccessToken")
         case .jd: return names.contains("pt_key") || names.contains("pt_pin")
@@ -27,7 +28,7 @@ enum LoginCheck {
     static func uid(_ cookies: [HTTPCookie], _ p: Platform) -> String {
         func val(_ n: String) -> String { cookies.first { $0.name == n }?.value ?? "" }
         switch p {
-        case .taobao: return val("unb").isEmpty ? val("cookie2") : val("unb")
+        case .taobao: return val("unb").isEmpty ? val("_nk_") : val("unb")
         case .pdd: return val("pdd_user_id").isEmpty ? val("api_uid") : val("pdd_user_id")
         case .jd: return val("pt_pin")
         case .mi: return val("cUserId").isEmpty ? val("userId") : val("cUserId")
@@ -189,6 +190,13 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
         try? await Task.sleep(nanoseconds: 5_000_000_000)
         res.account = await account(.taobao)
         res.debug.append("cookie=" + (await cookieDebug(["taobao.com", "cainiao.com"])))
+
+        // 未登录时会被重定向到淘宝登录页，直接短路返回，避免空耗 30 秒
+        let curURL = await eval("(function(){return String(location.href||'')})()")
+        if curURL.contains("//login.") || curURL.contains("passport") {
+            res.debug.append("未登录（停在登录页），请到「我的→账号」完成淘宝真实登录后再抓取")
+            return res
+        }
 
         let phone = await eval("(function(){var t=(document.body&&document.body.innerText)||'';var m=t.match(/1\\d{10}/);return m?m[0]:''})()")
         res.debug.append("phone=\(phone.isEmpty ? "未识别" : phone)")

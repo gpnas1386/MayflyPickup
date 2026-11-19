@@ -101,6 +101,16 @@ struct WebLoginView: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(theme.card)
+                if platform == .taobao {
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle").foregroundColor(theme.sub)
+                        Text("若「本机号码一键登录」不可用，请点「换个登录方式」改用短信验证码登录，登录完成会自动回到包裹列表")
+                            .font(.system(size: 11)).foregroundColor(theme.sub)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14).padding(.bottom, 8)
+                    .background(theme.card)
+                }
                 LoginWeb(bridge: bridge, url: startURL)
             }
             .navigationTitle("登录 \(platform.short)")
