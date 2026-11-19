@@ -35,17 +35,25 @@ struct AccountRow: View {
     }
 }
 
-final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
+final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
     let web: WKWebView
     private(set) var loadedStart: URL?
+    private var payloads: [(kind: String, json: String)] = []
 
     override init() {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
+        // 关键：必须先配置再创建 WebView（WKWebView 初始化时会拷贝 configuration）
+        cfg.userContentController.add(self, name: "mayfly")
+        cfg.userContentController.addUserScript(
+            WKUserScript(source: ScrapeScripts.bootstrap, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         web = WKWebView(frame: .zero, configuration: cfg)
         super.init()
         web.navigationDelegate = self
         web.uiDelegate = self
+        // 关键：与隐藏抓取 WebView（WebRunner）使用完全相同的 UA，
+        // 拼多多等平台会把登录态和 UA 指纹绑定，UA 不一致会被服务器判定会话无效（pdduid=0）
+        web.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1"
     }
 
     /// 同一登录页只加载一次，避免 SwiftUI 重建视图时叠加导航
@@ -57,6 +65,93 @@ final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate, WKUID
 
     func cookies(_ done: @escaping ([HTTPCookie]) -> Void) {
         web.configuration.websiteDataStore.httpCookieStore.getAllCookies { done($0) }
+    }
+
+    func cookiesAsync() async -> [HTTPCookie] {
+        await withCheckedContinuation { (c: CheckedContinuation<[HTTPCookie], Never>) in
+            web.configuration.websiteDataStore.httpCookieStore.getAllCookies { c.resume(returning: $0) }
+        }
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        let s = "\(message.body)"
+        if let d = s.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let kind = obj["t"] as? String {
+            payloads.append((kind, s))
+        } else {
+            payloads.append(("raw", s))
+        }
+    }
+
+    @discardableResult
+    private func eval(_ js: String) async -> String {
+        let v = try? await web.evaluateJavaScript(js)
+        if let s = v as? String { return s }
+        if let v = v { return "\(v)" }
+        return ""
+    }
+
+    private func waitPayload(kind: String, timeout: TimeInterval = 12) async -> String? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let hit = payloads.last(where: { $0.kind == kind }) {
+                payloads.removeAll { $0.kind == kind }
+                return hit.json
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+        return nil
+    }
+
+    /// 登录成功后，直接在登录同一个 WebView 里完成抓取：
+    /// Cookie / UA / 会话 / 指纹全程一致，规避拼多多等平台「换 WebView 就掉登录」的风控
+    @MainActor
+    func scrapePass(_ p: Platform) async -> ScrapeResult {
+        var res = ScrapeResult()
+        guard let target = p.scrapeURL else { return res }
+
+        let ck = await cookiesAsync()
+        if LoginCheck.loggedIn(ck, p) {
+            res.account = AccountInfo(nick: p.short + " 账号", uid: LoginCheck.uid(ck, p))
+        }
+
+        web.load(URLRequest(url: target))
+        try? await Task.sleep(nanoseconds: 7_000_000_000)
+
+        let cur = await eval("(function(){return String(location.href||'')})()")
+        res.debug.append("url=\(cur)")
+        if cur.contains("login.html") || cur.contains("//login.") || cur.contains("passport") {
+            res.debug.append("仍在登录页，未抓取（请确认页面已完成登录）")
+            return res
+        }
+
+        // 拼多多等懒加载列表：滚动到底再回顶，触发接口请求
+        await eval("(function(){try{window.scrollTo(0,document.body?document.body.scrollHeight:0)}catch(e){}})()")
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        await eval("(function(){try{window.scrollTo(0,0)}catch(e){}})()")
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+        await eval(ScrapeScripts.dumpPage)
+        if let payload = await waitPayload(kind: "page", timeout: 12),
+           let data = payload.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            res.pageText = obj["text"] as? String ?? ""
+            res.pickups.append(contentsOf: DeepScan.pickups(fromCapture: obj, source: p))
+            res.pickups.append(contentsOf: PickupParser.parse(res.pageText, source: p))
+            if let cap = obj["cap"] as? [[String: Any]] {
+                res.debug.append("cap=\(cap.count)")
+                for c in cap {
+                    res.pickups.append(contentsOf: PickupParser.parse(c["b"] as? String ?? "", source: p))
+                }
+            }
+            let head = String(res.pageText.prefix(200)).replacingOccurrences(of: "\n", with: " / ")
+            res.debug.append("textHead=\(head)")
+        } else {
+            res.debug.append("page=响应超时")
+        }
+        res.pickups = DeepScan.dedupe(res.pickups)
+        return res
     }
 
     /// 新窗口跳转（target=_blank，如淘宝登录面板）在同一 WebView 内打开，
@@ -146,9 +241,15 @@ struct WebLoginView: View {
         bridge.cookies { cookies in
             if LoginCheck.loggedIn(cookies, platform) {
                 let uid = LoginCheck.uid(cookies, platform)
-                let acc = AccountInfo(nick: platform.short + " 账号", uid: uid)
-                onDone(ScrapeResult(account: acc))
-                dismiss()
+                Task { @MainActor in
+                    // 在登录同一个 WebView 里直接抓取（Cookie/UA/会话一致，规避风控）
+                    var res = await bridge.scrapePass(platform)
+                    if res.account == nil {
+                        res.account = AccountInfo(nick: platform.short + " 账号", uid: uid)
+                    }
+                    onDone(res)
+                    dismiss()
+                }
             } else {
                 done = false
                 failedLogin = true

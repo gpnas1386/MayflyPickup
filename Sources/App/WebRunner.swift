@@ -48,6 +48,17 @@ extension Platform {
         case .manual: return []
         }
     }
+
+    /// 各平台的抓取目标页（登录 WebView 内直接抓取时复用）
+    var scrapeURL: URL? {
+        switch self {
+        case .taobao: return URL(string: "https://page.cainiao.com/mcn/union-post/index.html#/order-list")
+        case .pdd: return URL(string: "https://m.pinduoduo.net/mdkd/package")
+        case .jd: return URL(string: "https://trade.m.jd.com/order/orderlist_jdm.shtml?source=m_outer_jx_order")
+        case .mi: return URL(string: "https://m.mi.com/order_list?type=2")
+        case .manual: return nil
+        }
+    }
 }
 
 /// 直接在默认 Cookie 仓上清除指定域的 Cookie（无需创建 WebView）
@@ -274,12 +285,9 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
         res.account = await account(.pdd)
         res.debug.append("cookie=" + (await cookieDebug(["pinduoduo.com", "yangkeduo.com"])))
 
-        // 被踢到登录页说明 Cookie 里的 Token 已失效（服务器返回 pdduid=0）：
-        // 清掉旧 Cookie，提示重新登录，避免空转
         let pddURL = await eval("(function(){return String(location.href||'')})()")
         if pddURL.contains("login.html") || pddURL.contains("//login.") || pddURL.contains("passport") {
-            res.debug.append("登录态失效（旧 Token 被服务器拒绝），已清除旧 Cookie，请到「我的→账号」重新登录")
-            await clearCookies(.pdd)
+            res.debug.append("服务器拒绝了会话（可能 UA/指纹与登录时不一致），请改用「登录页内的抓取」：到「我的→账号」点登录→登录后点「完成」")
             return res
         }
 
@@ -320,7 +328,6 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
         let jdURL = await eval("(function(){return String(location.href||'')})()")
         if jdURL.contains("//login.") || jdURL.contains("passport") {
             res.debug.append("登录态失效，请到「我的→账号」重新登录京东")
-            await clearCookies(.jd)
             return res
         }
         await eval(ScrapeScripts.dumpPage)
@@ -347,7 +354,6 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
         let miURL = await eval("(function(){return String(location.href||'')})()")
         if miURL.contains("//login.") || miURL.contains("passport") || miURL.contains("/login") {
             res.debug.append("登录态失效，请到「我的→账号」重新登录小米")
-            await clearCookies(.mi)
             return res
         }
         await eval(ScrapeScripts.dumpPage)

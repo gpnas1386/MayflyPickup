@@ -73,8 +73,14 @@ extension AppModel {
         if snap.accounts == nil { snap.accounts = [:] }
         snap.accounts?[p.rawValue] = acc
         persist()
-        Task { await scrape(platform: p, force: true) }
-        toast = "\(p.short) 已登录：\(acc.nick)"
+        if !result.pickups.isEmpty || !result.debug.isEmpty {
+            // 结果来自登录 WebView 内的直接抓取（会话一致），直接入库，不再走隐藏 WebView 重抓
+            applyScrape(result, source: p)
+            toast = "\(p.short) 已登录：导入 \(result.pickups.count) 个取件码"
+        } else {
+            Task { await scrape(platform: p, force: true) }
+            toast = "\(p.short) 已登录：\(acc.nick)"
+        }
     }
 
     func logout(_ p: Platform) {
