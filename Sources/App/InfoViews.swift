@@ -36,7 +36,21 @@ struct DiagnosticsView: View {
                         copied = true
                     }
                 }
+                Button("复制运行日志") {
+                    UIPasteboard.general.string = model.logs.joined(separator: "\n")
+                    copied = true
+                }
                 Button("清空已取记录") { model.clearPicked() }
+            }
+            Section("运行日志（最新在后）") {
+                if model.logs.isEmpty {
+                    Text("暂无日志").font(.system(size: 12)).foregroundColor(theme.sub)
+                } else {
+                    ForEach(Array(model.logs.suffix(40).enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(theme.text).textSelection(.enabled)
+                    }
+                }
             }
         }
         .navigationTitle("诊断")

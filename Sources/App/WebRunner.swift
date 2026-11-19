@@ -7,6 +7,8 @@ struct ScrapeResult {
     var nick: String = ""
     var account: AccountInfo?
     var pageText: String = ""
+    /// 每一步的抓取诊断（写入运行日志，便于排查）
+    var debug: [String] = []
 }
 
 enum LoginCheck {
@@ -158,18 +160,44 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
 
     // MARK: - 平台流程
 
+    /// 汇总当前相关域名的 Cookie 名（诊断用，不含值）
+    func cookieDebug(_ hosts: [String]) async -> String {
+        let ck = await cookies()
+        let names = Set(ck.filter { c in hosts.contains { c.domain.contains($0) } }.map { $0.name })
+        let list = names.sorted().prefix(18)
+        return list.isEmpty ? "无相关Cookie" : list.joined(separator: ",")
+    }
+
+    /// 把 page 载荷里的诊断信息并入 res.debug
+    func pageDebug(_ obj: [String: Any], _ res: inout ScrapeResult) {
+        if let d = obj["dbg"] as? [String: Any] {
+            res.debug.append("hook=\(d["inst"] ?? "?") cap=\(d["capN"] ?? 0) title=\(d["title"] ?? "")")
+            if let urls = d["capUrls"] as? [String], !urls.isEmpty {
+                res.debug.append("capUrls=" + urls.joined(separator: " | "))
+            }
+        }
+        if let u = obj["url"] as? String { res.debug.append("url=\(u)") }
+        let head = String(res.pageText.prefix(220)).replacingOccurrences(of: "\n", with: " / ")
+        res.debug.append("textHead=\(head)")
+    }
+
     func taobaoPass(waybills: [String]) async -> ScrapeResult {
         var res = ScrapeResult()
         await load(URL(string: "https://m.cainiao.com/")!)
         try? await Task.sleep(nanoseconds: 3_500_000_000)
         res.account = await account(.taobao)
+        res.debug.append("cookie=" + (await cookieDebug(["taobao.com", "cainiao.com"])))
 
         let phone = await eval("(function(){var t=(document.body&&document.body.innerText)||'';var m=t.match(/1\\d{10}/);return m?m[0]:''})()")
+        res.debug.append("phone=\(phone.isEmpty ? "未识别" : phone)")
         await eval(ScrapeScripts.tbIdentity)
         if let payload = await waitPayload(kind: "identity", timeout: 10),
            let data = payload.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             res.identity = DeepScan.identityCode(in: obj)
+            if let err = obj["err"] as? String { res.debug.append("identityErr=\(err)") }
+        } else {
+            res.debug.append("identity=响应超时")
         }
 
         if !waybills.isEmpty || !phone.isEmpty {
@@ -178,8 +206,21 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
                let data = payload.data(using: .utf8),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 res.pickups.append(contentsOf: DeepScan.pickups(fromJSON: obj, source: .taobao))
+                if let err = obj["err"] as? String {
+                    res.debug.append("packagesErr=\(err)")
+                } else if let rows = obj["rows"] as? [[String: Any]] {
+                    for r in rows.prefix(8) {
+                        res.debug.append("mtop[\(r["tag"] ?? "?")]=ok:\(r["ok"] ?? false) ret=\(r["ret"] ?? "")")
+                    }
+                }
+            } else {
+                res.debug.append("packages=响应超时")
             }
         }
+
+        // 滚动触发包裹列表懒加载
+        await eval("(function(){try{window.scrollTo(0,document.body?document.body.scrollHeight:0)}catch(e){}})()")
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
 
         await eval(ScrapeScripts.dumpPage)
         if let payload = await waitPayload(kind: "page", timeout: 12),
@@ -194,6 +235,9 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
                     res.pickups.append(contentsOf: PickupParser.parse(body, source: .taobao))
                 }
             }
+            pageDebug(obj, &res)
+        } else {
+            res.debug.append("page=响应超时")
         }
         res.pickups = DeepScan.dedupe(res.pickups)
         return res
@@ -204,6 +248,7 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
         await load(URL(string: "https://m.pinduoduo.net/mdkd/package")!)
         try? await Task.sleep(nanoseconds: 7_000_000_000)
         res.account = await account(.pdd)
+        res.debug.append("cookie=" + (await cookieDebug(["pinduoduo.com", "yangkeduo.com"])))
         // 滚动到底再回顶，触发快递列表的懒加载与接口请求（抓包钩子会记录响应）
         await eval("(function(){try{window.scrollTo(0,document.body?document.body.scrollHeight:0)}catch(e){}})()")
         try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -223,6 +268,9 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
                     res.pickups.append(contentsOf: PickupParser.parse(body, source: .pdd))
                 }
             }
+            pageDebug(obj, &res)
+        } else {
+            res.debug.append("page=响应超时")
         }
         res.pickups = DeepScan.dedupe(res.pickups)
         return res
@@ -234,6 +282,7 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
         await load(url)
         try? await Task.sleep(nanoseconds: 6_000_000_000)
         res.account = await account(.jd)
+        res.debug.append("cookie=" + (await cookieDebug(["jd.com", "360buy.com"])))
         await eval(ScrapeScripts.dumpPage)
         if let payload = await waitPayload(kind: "page", timeout: 12),
            let data = payload.data(using: .utf8),
@@ -241,6 +290,9 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
             res.pageText = obj["text"] as? String ?? ""
             res.pickups.append(contentsOf: DeepScan.pickups(fromCapture: obj, source: .jd))
             res.pickups.append(contentsOf: PickupParser.parse(res.pageText, source: .jd))
+            pageDebug(obj, &res)
+        } else {
+            res.debug.append("page=响应超时")
         }
         res.pickups = DeepScan.dedupe(res.pickups)
         return res
@@ -251,6 +303,7 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
         await load(URL(string: "https://m.mi.com/order_list?type=2")!)
         try? await Task.sleep(nanoseconds: 6_000_000_000)
         res.account = await account(.mi)
+        res.debug.append("cookie=" + (await cookieDebug(["mi.com", "xiaomi.com"])))
         await eval(ScrapeScripts.dumpPage)
         if let payload = await waitPayload(kind: "page", timeout: 12),
            let data = payload.data(using: .utf8),
@@ -258,6 +311,9 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
             res.pageText = obj["text"] as? String ?? ""
             res.pickups.append(contentsOf: PickupParser.parse(res.pageText, source: .mi))
             res.pickups.append(contentsOf: DeepScan.pickups(fromCapture: obj, source: .mi))
+            pageDebug(obj, &res)
+        } else {
+            res.debug.append("page=响应超时")
         }
         res.pickups = DeepScan.dedupe(res.pickups)
         return res

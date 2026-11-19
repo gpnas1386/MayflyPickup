@@ -83,8 +83,8 @@ enum ScrapeScripts {
             if (!(window.lib && window.lib.mtop)) { window.__mayflyPost(JSON.stringify({t:'packages', err:'NOLIB'})); return; }
             var lib = window.lib.mtop;
             var rows = [];
-            function call(tag, api, data){
-              return lib.request({api:api, v:'1.0', data:data, ecode:1, dataType:'json', type:'GET', timeout:9000})
+            function call(tag, api, data, ver){
+              return lib.request({api:api, v:ver||'1.0', data:data, ecode:1, dataType:'json', type:'GET', timeout:9000})
                 .then(function(r){ rows.push({tag:tag, api:api, ok:true, ret:(r&&r.ret||[]).join('|'), body:(r&&r.data)||r}); },
                       function(e){ rows.push({tag:tag, api:api, ok:false, ret:((e&&e.ret)||[]).join('|')}); });
             }
@@ -92,11 +92,15 @@ enum ScrapeScripts {
             var phone = "\(phoneStr)";
             var jobs = [];
             if (phone) {
-              jobs.push(call('phone01', 'mtop.cainiao.pickup.search.queryMultiStationPackages', {searchTypes:'["01"]', searchValue: phone}));
-              jobs.push(call('phone01b', 'mtop.cainiao.pickup.plus.querymultistapackages4xy', {searchTypes:'["01"]', searchValue: phone}));
+              ['1.0','2.0'].forEach(function(v){
+                jobs.push(call('phone01@'+v, 'mtop.cainiao.pickup.search.queryMultiStationPackages', {searchTypes:'["01"]', searchValue: phone}, v));
+                jobs.push(call('phone01b@'+v, 'mtop.cainiao.pickup.plus.querymultistapackages4xy', {searchTypes:'["01"]', searchValue: phone}, v));
+              });
             }
-            wbs.slice(0, 12).forEach(function(w, i){
-              jobs.push(call('wb'+i, 'mtop.cainiao.pickup.search.queryMultiStationPackages', {searchTypes:'["03"]', searchValue: String(w)}));
+            wbs.slice(0, 6).forEach(function(w, i){
+              ['1.0','2.0'].forEach(function(v){
+                jobs.push(call('wb'+i+'@'+v, 'mtop.cainiao.pickup.search.queryMultiStationPackages', {searchTypes:'["03"]', searchValue: String(w)}, v));
+              });
             });
             Promise.all(jobs).then(function(){
               window.__mayflyPost(JSON.stringify({t:'packages', rows: rows}));
@@ -106,13 +110,22 @@ enum ScrapeScripts {
         """
     }
 
-    /// 读取页面文本 + 抓包缓存
+    /// 读取页面文本 + 抓包缓存 + 注入诊断
     static let dumpPage = #"""
     (function(){
       var t = '';
       try { t = (document.body && document.body.innerText) || ''; } catch(e){}
       var cap = []; try { cap = window.__cap || []; } catch(e){}
-      var out = {t:'page', url: location.href, text: t.slice(0, 60000), cap: cap};
+      var urls = [];
+      try { for (var i = 0; i < cap.length && i < 8; i++) urls.push(String(cap[i].u || '').slice(0, 120)); } catch(e){}
+      var dbg = {
+        inst: !!window.__mayflyInstalled,
+        capN: cap.length,
+        capUrls: urls,
+        title: String(document.title || '').slice(0, 60),
+        url: String(location.href).slice(0, 200)
+      };
+      var out = {t:'page', url: location.href, text: t.slice(0, 60000), cap: cap, dbg: dbg};
       window.__mayflyPost(JSON.stringify(out));
       return 'ok';
     })();
