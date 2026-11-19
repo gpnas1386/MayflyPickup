@@ -115,13 +115,22 @@ final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate, WKScr
         if LoginCheck.loggedIn(ck, p) {
             res.account = AccountInfo(nick: p.short + " 账号", uid: LoginCheck.uid(ck, p))
         }
+        let names = Set(ck.filter { c in p.cookieHosts.contains { c.domain.contains($0) } }.map { $0.name }).sorted().prefix(18)
+        res.debug.append("cookie=" + (names.isEmpty ? "无相关Cookie" : names.joined(separator: ",")))
 
-        web.load(URLRequest(url: target))
-        try? await Task.sleep(nanoseconds: 7_000_000_000)
-
+        // 若当前页面已经在抓取目标页上（用户手动导航过去），不要重载——
+        // 重载可能触发二次跳登录/风控，直接抓当前页
         let cur = await eval("(function(){return String(location.href||'')})()")
-        res.debug.append("url=\(cur)")
-        if cur.contains("login.html") || cur.contains("//login.") || cur.contains("passport") {
+        let host = target.host ?? ""
+        let onTarget = cur.contains(host) && cur.contains(target.path) && !cur.contains("login")
+        if !onTarget {
+            web.load(URLRequest(url: target))
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+        }
+
+        let cur2 = await eval("(function(){return String(location.href||'')})()")
+        res.debug.append("url=\(cur2)")
+        if cur2.contains("login.html") || cur2.contains("//login.") || cur2.contains("passport") {
             res.debug.append("仍在登录页，未抓取（请确认页面已完成登录）")
             return res
         }
@@ -149,6 +158,24 @@ final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate, WKScr
             res.debug.append("textHead=\(head)")
         } else {
             res.debug.append("page=响应超时")
+        }
+
+        // 第二轮：给懒加载接口更多时间，__cap 会累积此前的所有响应，再解析一次
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        await eval(ScrapeScripts.dumpPage)
+        if let payload = await waitPayload(kind: "page", timeout: 10),
+           let data = payload.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let moreText = obj["text"] as? String ?? ""
+            if moreText.count > res.pageText.count { res.pageText = moreText }
+            res.pickups.append(contentsOf: DeepScan.pickups(fromCapture: obj, source: p))
+            res.pickups.append(contentsOf: PickupParser.parse(res.pageText, source: p))
+            if let cap = obj["cap"] as? [[String: Any]] {
+                res.debug.append("cap2=\(cap.count)")
+                for c in cap {
+                    res.pickups.append(contentsOf: PickupParser.parse(c["b"] as? String ?? "", source: p))
+                }
+            }
         }
         res.pickups = DeepScan.dedupe(res.pickups)
         return res
