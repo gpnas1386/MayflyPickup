@@ -183,8 +183,10 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
 
     func taobaoPass(waybills: [String]) async -> ScrapeResult {
         var res = ScrapeResult()
-        await load(URL(string: "https://m.cainiao.com/")!)
-        try? await Task.sleep(nanoseconds: 3_500_000_000)
+        // 注意：m.cainiao.com 根路径是广告跳转页，会立即重定向到淘宝营销页；
+        // 真正的菜鸟 H5 包裹列表在 page.cainiao.com（自带 lib.mtop 与登录组件）
+        await load(URL(string: "https://page.cainiao.com/mcn/union-post/index.html#/order-list")!)
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
         res.account = await account(.taobao)
         res.debug.append("cookie=" + (await cookieDebug(["taobao.com", "cainiao.com"])))
 

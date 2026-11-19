@@ -81,7 +81,8 @@ struct WebLoginView: View {
 
     private var startURL: URL {
         switch platform {
-        case .taobao: return URL(string: "https://m.cainiao.com/")!
+        // m.cainiao.com 根路径是广告跳转页；菜鸟正式 H5（含登录组件与包裹列表）在这里
+        case .taobao: return URL(string: "https://page.cainiao.com/mcn/union-post/index.html#/order-list")!
         case .pdd: return URL(string: "https://m.pinduoduo.net/")!
         case .jd: return URL(string: "https://m.jd.com/")!
         case .mi: return URL(string: "https://m.mi.com/")!
