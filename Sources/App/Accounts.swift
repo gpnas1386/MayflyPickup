@@ -41,6 +41,7 @@ final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate, WKScr
     private var payloads: [(kind: String, json: String)] = []
 
     override init() {
+        super.init()
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
         // 关键：必须先配置再创建 WebView（WKWebView 初始化时会拷贝 configuration）
@@ -48,7 +49,6 @@ final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate, WKScr
         cfg.userContentController.addUserScript(
             WKUserScript(source: ScrapeScripts.bootstrap, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         web = WKWebView(frame: .zero, configuration: cfg)
-        super.init()
         web.navigationDelegate = self
         web.uiDelegate = self
         // 关键：与隐藏抓取 WebView（WebRunner）使用完全相同的 UA，
