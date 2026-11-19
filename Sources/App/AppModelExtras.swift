@@ -81,7 +81,8 @@ extension AppModel {
         Pref.shared.setAccount(p, nil)
         snap.accounts?[p.rawValue] = nil
         persist()
-        toast = "已退出 \(p.short)"
+        toast = "已退出 \(p.short)（登录 Cookie 一并清除）"
+        Task { await CookieCleaner.clear(hosts: p.cookieHosts) }
     }
 
     func onForeground() async {

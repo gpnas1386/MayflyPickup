@@ -111,7 +111,7 @@ struct WebLoginView: View {
                     .padding(.horizontal, 14).padding(.bottom, 8)
                     .background(theme.card)
                 }
-                LoginWeb(bridge: bridge, url: startURL)
+                LoginWeb(bridge: bridge, url: startURL, platform: platform)
             }
             .navigationTitle("登录 \(platform.short)")
             .navigationBarTitleDisplayMode(.inline)
@@ -160,9 +160,15 @@ struct WebLoginView: View {
 struct LoginWeb: UIViewRepresentable {
     let bridge: LoginBridge
     let url: URL
+    let platform: Platform
 
     func makeUIView(context: Context) -> WKWebView {
-        bridge.start(url)
+        // 先清掉该平台的旧 Cookie（可能是失效/残留 Token，会导致"看着已登录实际没登录"），
+        // 再加载登录页，确保这次拿到全新有效 Token
+        Task { @MainActor in
+            await CookieCleaner.clear(hosts: platform.cookieHosts)
+            bridge.start(url)
+        }
         return bridge.web
     }
 

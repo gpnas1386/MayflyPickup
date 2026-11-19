@@ -37,6 +37,34 @@ enum LoginCheck {
     }
 }
 
+extension Platform {
+    /// 各平台的登录 Cookie 域
+    var cookieHosts: [String] {
+        switch self {
+        case .taobao: return ["taobao.com", "tmall.com", "cainiao.com", "alicdn.com"]
+        case .pdd: return ["pinduoduo.com", "yangkeduo.com"]
+        case .jd: return ["jd.com", "jd.hk", "360buy.com"]
+        case .mi: return ["mi.com", "xiaomi.com", "miui.com"]
+        case .manual: return []
+        }
+    }
+}
+
+/// 直接在默认 Cookie 仓上清除指定域的 Cookie（无需创建 WebView）
+enum CookieCleaner {
+    static func clear(hosts: [String]) async {
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        let all = await withCheckedContinuation { (c: CheckedContinuation<[HTTPCookie], Never>) in
+            store.getAllCookies { c.resume(returning: $0) }
+        }
+        for cookie in all where hosts.contains(where: { cookie.domain.contains($0) }) {
+            await withCheckedContinuation { (con: CheckedContinuation<Void, Never>) in
+                store.delete(cookie) { con.resume() }
+            }
+        }
+    }
+}
+
 /// 隐藏 WKWebView 执行器：复用 App 默认 Cookie 仓，登录态与登录页共享
 @MainActor
 final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
@@ -129,21 +157,7 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
     }
 
     func clearCookies(_ p: Platform) async {
-        let all = await cookies()
-        let store = web.configuration.websiteDataStore.httpCookieStore
-        let hosts: [String]
-        switch p {
-        case .taobao: hosts = ["taobao.com", "tmall.com", "cainiao.com", "alicdn.com"]
-        case .pdd: hosts = ["pinduoduo.com", "yangkeduo.com"]
-        case .jd: hosts = ["jd.com", "jd.hk", "360buy.com"]
-        case .mi: hosts = ["mi.com", "xiaomi.com", "miui.com"]
-        case .manual: hosts = []
-        }
-        for c in all where hosts.contains(where: { c.domain.contains($0) }) {
-            await withCheckedContinuation { (con: CheckedContinuation<Void, Never>) in
-                store.delete(c) { con.resume() }
-            }
-        }
+        await CookieCleaner.clear(hosts: p.cookieHosts)
     }
 
     private func account(_ p: Platform) async -> AccountInfo? {
@@ -259,6 +273,16 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
         try? await Task.sleep(nanoseconds: 7_000_000_000)
         res.account = await account(.pdd)
         res.debug.append("cookie=" + (await cookieDebug(["pinduoduo.com", "yangkeduo.com"])))
+
+        // 被踢到登录页说明 Cookie 里的 Token 已失效（服务器返回 pdduid=0）：
+        // 清掉旧 Cookie，提示重新登录，避免空转
+        let pddURL = await eval("(function(){return String(location.href||'')})()")
+        if pddURL.contains("login.html") || pddURL.contains("//login.") || pddURL.contains("passport") {
+            res.debug.append("登录态失效（旧 Token 被服务器拒绝），已清除旧 Cookie，请到「我的→账号」重新登录")
+            await clearCookies(.pdd)
+            return res
+        }
+
         // 滚动到底再回顶，触发快递列表的懒加载与接口请求（抓包钩子会记录响应）
         await eval("(function(){try{window.scrollTo(0,document.body?document.body.scrollHeight:0)}catch(e){}})()")
         try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -293,6 +317,12 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
         try? await Task.sleep(nanoseconds: 6_000_000_000)
         res.account = await account(.jd)
         res.debug.append("cookie=" + (await cookieDebug(["jd.com", "360buy.com"])))
+        let jdURL = await eval("(function(){return String(location.href||'')})()")
+        if jdURL.contains("//login.") || jdURL.contains("passport") {
+            res.debug.append("登录态失效，请到「我的→账号」重新登录京东")
+            await clearCookies(.jd)
+            return res
+        }
         await eval(ScrapeScripts.dumpPage)
         if let payload = await waitPayload(kind: "page", timeout: 12),
            let data = payload.data(using: .utf8),
@@ -314,6 +344,12 @@ final class WebRunner: NSObject, WKNavigationDelegate, WKScriptMessageHandler, W
         try? await Task.sleep(nanoseconds: 6_000_000_000)
         res.account = await account(.mi)
         res.debug.append("cookie=" + (await cookieDebug(["mi.com", "xiaomi.com"])))
+        let miURL = await eval("(function(){return String(location.href||'')})()")
+        if miURL.contains("//login.") || miURL.contains("passport") || miURL.contains("/login") {
+            res.debug.append("登录态失效，请到「我的→账号」重新登录小米")
+            await clearCookies(.mi)
+            return res
+        }
         await eval(ScrapeScripts.dumpPage)
         if let payload = await waitPayload(kind: "page", timeout: 12),
            let data = payload.data(using: .utf8),
