@@ -36,7 +36,7 @@ struct AccountRow: View {
 }
 
 final class LoginBridge: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
-    let web: WKWebView
+    var web: WKWebView!
     private(set) var loadedStart: URL?
     private var payloads: [(kind: String, json: String)] = []
 
